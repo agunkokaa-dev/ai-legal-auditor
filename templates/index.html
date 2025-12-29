@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Legal Auditor + Graph Modal</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        /* --- 1. LAYOUT UTAMA (Chat Bersih) --- */
+        body { font-family: 'Segoe UI', sans-serif; background-color: #f4f6f8; display: flex; justify-content: center; height: 100vh; margin: 0; }
+        
+        .chat-container { width: 100%; max-width: 700px; background: white; box-shadow: 0 0 20px rgba(0,0,0,0.1); display: flex; flex-direction: column; height: 100vh; }
+        
+        .header { background: #2c3e50; color: white; padding: 15px 20px; display: flex; align-items: center; justify-content: space-between; }
+        .header h3 { margin: 0; font-size: 1.2rem; }
+
+        #chat-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        
+        .message { padding: 12px 18px; border-radius: 12px; font-size: 0.95rem; max-width: 80%; line-height: 1.5; }
+        .user-msg { align-self: flex-end; background: #3498db; color: white; border-bottom-right-radius: 2px; }
+        .bot-msg { align-self: flex-start; background: #ecf0f1; color: #2c3e50; border-bottom-left-radius: 2px; }
+
+        /* Tombol Input */
+        .input-area { padding: 20px; background: white; border-top: 1px solid #eee; display: flex; gap: 10px; }
+        input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 25px; outline: none; }
+        button.send-btn { padding: 10px 25px; background: #2c3e50; color: white; border: none; border-radius: 25px; cursor: pointer; font-weight: bold; }
+
+        /* --- 2. TOMBOL GRAPH (Muncul di Chat) --- */
+        .graph-btn {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 8px 12px;
+            background-color: #e67e22; /* Warna Oranye */
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+        .graph-btn:hover { background-color: #d35400; }
+
+        /* --- 3. MODAL POPUP (Tempat Graph) --- */
+        .modal {
+            display: none; /* Default tersembunyi */
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.6); /* Latar belakang gelap transparan */
+            backdrop-filter: blur(3px);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5vh auto; /* 5% dari atas */
+            padding: 0;
+            border-radius: 10px;
+            width: 90%;
+            height: 90vh; /* Tinggi 90% layar */
+            position: relative;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 15px;
+            background: #2980b9;
+            color: white;
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .close-btn { color: white; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-btn:hover { color: #ddd; }
+
+        #mynetwork { flex: 1; background: #fff; width: 100%; height: 100%; }
+
+    </style>
+</head>
+<body>
+
+    <div class="chat-container">
+        <div class="header">
+            <h3>⚖️ AI Legal Auditor</h3>
+        </div>
+
+        <div id="chat-box">
+            <div class="message bot-msg">
+                Halo! Silakan tanya tentang pasal, jika perlu visualisasi klik tombol yang muncul nanti.
+            </div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Tanya sesuatu..." onkeypress="handleEnter(event)">
+            <button class="send-btn" onclick="sendMessage()">Kirim</button>
+        </div>
+    </div>
+
+    <div id="graphModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span style="font-size: 1.1rem;">🕸️ Visualisasi Hubungan Data</span>
+                <span class="close-btn" onclick="closeModal()">&times;</span>
+            </div>
+            <div id="mynetwork"></div> </div>
+    </div>
+
+<script>
+    // --- SETUP VIS.JS ---
+    var network = null;
+
+    // --- LOGIC CHAT ---
+    async function sendMessage() {
+        const inputField = document.getElementById("user-input");
+        const chatBox = document.getElementById("chat-box");
+        const question = inputField.value.trim();
+
+        if (!question) return;
+
+        appendMessage(question, "user-msg");
+        inputField.value = "";
+        
+        // Indikator loading
+        const loadingDiv = document.createElement("div");
+        loadingDiv.className = "message bot-msg";
+        loadingDiv.innerText = "⏳ Sedang berpikir...";
+        chatBox.appendChild(loadingDiv);
+
+        try {
+            const response = await fetch('/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: question })
+            });
+            const data = await response.json();
+
+            // Hapus loading
+            loadingDiv.remove();
+
+            // 1. Tampilkan Jawaban Teks
+            let formattedAnswer = data.answer.replace(/\n/g, '<br>');
+            
+            // 2. Cek apakah ada data Graph? Kalau ada, tambahkan Tombol
+            let buttonHtml = "";
+            if (data.sources && data.sources.length > 0) {
+                // Kita ambil nomor pasal (misal: [4, 2])
+                const pasalList = data.sources.map(s => s.pasal);
+                // Kita simpan array ini sebagai string JSON di dalam atribut onclick
+                const jsonPasal = JSON.stringify(pasalList);
+                buttonHtml = `<br><button class='graph-btn' onclick='openGraph(${jsonPasal})'>🕸️ Lihat Visualisasi Graph</button>`;
+            }
+
+            appendMessage(formattedAnswer + buttonHtml, "bot-msg");
+
+        } catch (error) {
+            loadingDiv.remove();
+            appendMessage("❌ Error koneksi.", "bot-msg");
+        }
+    }
+
+    // --- FUNGSI MODAL GRAPH ---
+    async function openGraph(pasalList) {
+        // 1. Buka Modal
+        document.getElementById('graphModal').style.display = "block";
+        document.getElementById('mynetwork').innerHTML = "<p style='text-align:center; padding:20px;'>Menggambar graph...</p>";
+
+        try {
+            // 2. Request Data Graph ke Flask
+            const response = await fetch('/get-graph', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pasal_list: pasalList })
+            });
+            const graphData = await response.json();
+
+            // 3. Gambar dengan Vis.js
+            drawGraph(graphData.nodes, graphData.edges);
+
+        } catch (e) {
+            console.error(e);
+            document.getElementById('mynetwork').innerText = "Gagal memuat graph.";
+        }
+    }
+
+    function closeModal() {
+        document.getElementById('graphModal').style.display = "none";
+    }
+
+    function drawGraph(nodesData, edgesData) {
+        var container = document.getElementById('mynetwork');
+        var data = {
+            nodes: new vis.DataSet(nodesData),
+            edges: new vis.DataSet(edgesData)
+        };
+        var options = {
+            nodes: { font: { multi: 'html' } },
+            layout: { randomSeed: 2 }, // Biar bentuknya konsisten
+            physics: {
+                stabilization: false,
+                barnesHut: { gravitationalConstant: -3000 }
+            }
+        };
+        network = new vis.Network(container, data, options);
+    }
+
+    function appendMessage(htmlContent, className) {
+        const chatBox = document.getElementById("chat-box");
+        const div = document.createElement("div");
+        div.className = `message ${className}`;
+        div.innerHTML = htmlContent; // Pakai innerHTML biar tombol & <br> kebaca
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function handleEnter(event) {
+        if (event.key === "Enter") sendMessage();
+    }
+    
+    // Tutup modal kalau user klik di luar kotak putih
+    window.onclick = function(event) {
+        const modal = document.getElementById('graphModal');
+        if (event.target == modal) {
+            closeModal();
+        }
+    }
+</script>
+
+</body>
+</html>

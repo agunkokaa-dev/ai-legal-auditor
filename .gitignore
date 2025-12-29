@@ -1,0 +1,17 @@
+# Environment Variables
+.env
+
+# Python
+__pycache__/
+venv/
+env/
+.venv/
+*.pyc
+
+# Database Neo4j (JANGAN DIHAPUS BARIS INI)
+data/
+neo4j/
+*.db
+*.jar
+import/
+plugins/

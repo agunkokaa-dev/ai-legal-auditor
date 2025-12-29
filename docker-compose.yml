@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # --- SERVICE 1: NEO4J (Graph & Vector Database) ---
+  neo4j:
+    image: neo4j:5.18.0
+    container_name: legal_neo4j
+    ports:
+      - "7474:7474" # HTTP (Browser Interface)
+      - "7687:7687" # Bolt (Connection untuk Python)
+    environment:
+      # Password awal. Nanti WAJIB diganti saat login pertama.
+      - NEO4J_AUTH=${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-password123}
+      # Plugin wajib untuk Graph Algorithm
+      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
+      # Izin keamanan untuk plugin
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      # Setting memori (Sesuaikan dengan RAM laptop Anda, ini setting hemat)
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+    volumes:
+      - ./data/neo4j/data:/data         # Menyimpan data agar tidak hilang saat restart
+      - ./data/neo4j/logs:/logs         # Log error
+      - ./data/neo4j/import:/var/lib/neo4j/import
+      - ./data/neo4j/plugins:/plugins
+    networks:
+      - legal_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- SERVICE 2: REDIS (Memory untuk Agent LangGraph) ---
+  redis:
+    image: redis:7.2-alpine
+    container_name: legal_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - legal_net
+    command: redis-server --save 60 1 --loglevel warning
+
+networks:
+  legal_net:
+    driver: bridge
